@@ -1,6 +1,6 @@
 # scripts/gw150914_edr_ringdown.py
 """
-Análisis de ringdown de GW150914 con el modelo EDR (modo 220 + modo X).
+Análisis de ringdown de GW150914 con GR y modelo EDR (modo 220 + modo X).
 
 Requiere que los archivos HDF5 de GW150914 estén en data/, generados por
 scripts/download_data.py
@@ -98,9 +98,7 @@ def ringdown_model_EDR(t: np.ndarray,
                        k_flow: float = 1.0,
                        gamma_flow: float = 10.0) -> np.ndarray:
     """
-    Modelo de ringdown EDR:
-
-      h(t) = h_220^EDR(t) + h_X(t)
+    Modelo de ringdown EDR: h(t) = h_220^EDR(t) + h_X(t)
     """
     f220_EDR, tau220_EDR, fX_Hz, tauX_s = qnm_EDR_parameters(
         alpha_flow=alpha_flow,
@@ -128,6 +126,22 @@ def load_strain_from_hdf5(path: str) -> tuple[np.ndarray, np.ndarray]:
     n = len(strain)
     times = t0 + np.arange(n) * dt
     return times, strain
+
+
+def chi2_stats(y: np.ndarray, y_model: np.ndarray, n_params: int) -> tuple[float, float, float, float]:
+    """
+    Devuelve S, chi2_red, AIC y BIC para un modelo dado.
+    Asumimos sigma=1 (datos ya normalizados).
+    """
+    n = len(y)
+    resid = y - y_model
+    S = np.sum(resid**2)
+    chi2 = S
+    dof = n - n_params
+    chi2_red = chi2 / dof if dof > 0 else np.nan
+    AIC = 2 * n_params + n * np.log(S / n)
+    BIC = n_params * np.log(n) + n * np.log(S / n)
+    return S, chi2_red, AIC, BIC
 
 
 def main() -> None:
@@ -246,11 +260,19 @@ def main() -> None:
     h_gr_norm  = model_gr_220(t_rel, *popt_gr)
     h_edr_norm = model_edr(t_rel, *popt_edr)
 
-    # 6. Pasar de vuelta a unidades físicas
+    # 6. Estadísticos χ2, AIC, BIC
+    S_gr, chi2r_gr, AIC_gr, BIC_gr = chi2_stats(h_norm, h_gr_norm, n_params=2)
+    S_edr, chi2r_edr, AIC_edr, BIC_edr = chi2_stats(h_norm, h_edr_norm, n_params=5)
+
+    print("\nComparación GR vs EDR en la ventana normalizada:")
+    print(f"GR :  S = {S_gr:.4e}, chi2_red = {chi2r_gr:.3f}, AIC = {AIC_gr:.2f}, BIC = {BIC_gr:.2f}")
+    print(f"EDR: S = {S_edr:.4e}, chi2_red = {chi2r_edr:.3f}, AIC = {AIC_edr:.2f}, BIC = {BIC_edr:.2f}")
+
+    # 7. Pasar de vuelta a unidades físicas
     h_gr_physical  = h_gr_norm  * h_rms
     h_edr_physical = h_edr_norm * h_rms
 
-    # 7. Gráfica con datos, GR y EDR
+    # 8. Gráfica con datos, GR y EDR
     plt.figure(figsize=(10, 5))
     plt.plot(t_rel * 1000, h_rd,          label="Datos H1 (ringdown)", lw=1, color="C0")
     plt.plot(t_rel * 1000, h_gr_physical, label="Modelo GR (modo 220)", lw=2, color="C1")

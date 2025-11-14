@@ -142,7 +142,7 @@ def main() -> None:
 
     # 1. Cargar señal H1
     t, h = load_strain_from_hdf5(h1_file)
-    h = h - np.mean(h)  # quitar media
+    h = h - np.mean(h)
 
     # 2. Ventana de ringdown
     idx_peak = np.argmax(np.abs(h))
@@ -242,17 +242,22 @@ def main() -> None:
     print(f"phiX       = {phiX_fit:.3f} ± {perr_edr[3]:.3f} rad")
     print(f"alpha_flow = {alpha_fit:.3e} ± {perr_edr[4]:.3e}")
 
-    h_fit = model_edr(t_rel, *popt_edr)
+    # Modelos en la ventana normalizada
+    h_gr_norm  = model_gr_220(t_rel, *popt_gr)
+    h_edr_norm = model_edr(t_rel, *popt_edr)
 
-    # 6. Gráfica en unidades originales (desnormalizando)
-    h_fit_physical = h_fit * h_rms
+    # 6. Pasar de vuelta a unidades físicas
+    h_gr_physical  = h_gr_norm  * h_rms
+    h_edr_physical = h_edr_norm * h_rms
 
+    # 7. Gráfica con datos, GR y EDR
     plt.figure(figsize=(10, 5))
-    plt.plot(t_rel * 1000, h_rd, label="Datos H1 (ringdown)", lw=1)
-    plt.plot(t_rel * 1000, h_fit_physical, label="Modelo EDR ajustado", lw=2)
+    plt.plot(t_rel * 1000, h_rd,          label="Datos H1 (ringdown)", lw=1, color="C0")
+    plt.plot(t_rel * 1000, h_gr_physical, label="Modelo GR (modo 220)", lw=2, color="C1")
+    plt.plot(t_rel * 1000, h_edr_physical,label="Modelo EDR (220+X)",   lw=2, color="C2")
     plt.xlabel("Tiempo desde inicio de la ventana [ms]")
     plt.ylabel("Strain")
-    plt.title("GW150914 (H1): Ajuste de ringdown con modelo EDR")
+    plt.title("GW150914 (H1): Datos vs GR y EDR")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()

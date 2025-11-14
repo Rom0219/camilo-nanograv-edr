@@ -27,6 +27,9 @@ def geom_time_from_mass_solar(m_solar: float) -> float:
 
 
 def qnm_220_GR(m_final_solar: float, a_final: float) -> tuple[float, float]:
+    """
+    Frecuencia (Hz) y tiempo de decaimiento (s) del modo (2,2,0) en GR.
+    """
     f1, f2, f3 = 1.5251, -1.1568, 0.1292
     g1, g2, g3 = 0.0889, -0.0260, 0.3350
 
@@ -39,12 +42,15 @@ def qnm_220_GR(m_final_solar: float, a_final: float) -> tuple[float, float]:
     omegaR_SI = omegaR_M / M_geom
     omegaI_SI = omegaI_M / M_geom
 
-    f_Hz = omegaR_SI / (2.0 * np.pi)
+    f_Hz  = omegaR_SI / (2.0 * np.pi)
     tau_s = 1.0 / abs(omegaI_SI)
     return f_Hz, tau_s
 
 
 def omega_horizon(m_final_solar: float, a_final: float) -> float:
+    """
+    Frecuencia angular del horizonte de Kerr (rad/s).
+    """
     M_geom = geom_time_from_mass_solar(m_final_solar)
     a = a_final
     rp_geom = M_geom * (1.0 + np.sqrt(1.0 - a**2))
@@ -56,17 +62,33 @@ def qnm_EDR_parameters(alpha_flow: float = 0.0,
                        beta_flow: float = 0.0,
                        k_flow: float = 1.0,
                        gamma_flow: float = 10.0) -> tuple[float, float, float, float]:
+    """
+    Frecuencias (Hz) y tiempos (s) para:
+      - 220^EDR
+      - modo nuevo X
+    """
     f220_GR, tau220_GR = qnm_220_GR(M_FINAL_SOLAR, A_FINAL)
 
     f220_EDR   = f220_GR   * (1.0 + alpha_flow)
     tau220_EDR = tau220_GR * (1.0 + beta_flow)
 
     omega_H = omega_horizon(M_FINAL_SOLAR, A_FINAL)
-    fX_Hz = (k_flow * omega_H) / (2.0 * np.pi)
-    M_geom = geom_time_from_mass_solar(M_FINAL_SOLAR)
-    tauX_s = gamma_flow * M_geom
+    fX_Hz   = (k_flow * omega_H) / (2.0 * np.pi)
+    M_geom  = geom_time_from_mass_solar(M_FINAL_SOLAR)
+    tauX_s  = gamma_flow * M_geom
 
     return f220_EDR, tau220_EDR, fX_Hz, tauX_s
+
+
+def ringdown_model_GR_220(t: np.ndarray,
+                          A220: float,
+                          phi220: float) -> np.ndarray:
+    """
+    Solo modo 220 en GR (sin correcciones EDR).
+    """
+    f220_GR, tau220_GR = qnm_220_GR(M_FINAL_SOLAR, A_FINAL)
+    omega220 = 2.0 * np.pi * f220_GR
+    return A220 * np.exp(-t / tau220_GR) * np.cos(omega220 * t + phi220)
 
 
 def ringdown_model_EDR(t: np.ndarray,
@@ -75,6 +97,11 @@ def ringdown_model_EDR(t: np.ndarray,
                        alpha_flow: float,
                        k_flow: float = 1.0,
                        gamma_flow: float = 10.0) -> np.ndarray:
+    """
+    Modelo de ringdown EDR:
+
+      h(t) = h_220^EDR(t) + h_X(t)
+    """
     f220_EDR, tau220_EDR, fX_Hz, tauX_s = qnm_EDR_parameters(
         alpha_flow=alpha_flow,
         beta_flow=0.0,
@@ -113,12 +140,11 @@ def main() -> None:
             f"No se encontró {h1_file}. Ejecuta primero scripts/download_data.py"
         )
 
+    # 1. Cargar señal H1
     t, h = load_strain_from_hdf5(h1_file)
+    h = h - np.mean(h)  # quitar media
 
-    # Filtro muy simple: quitar media (para este ejemplo básico)
-    h = h - np.mean(h)
-
-    # Seleccionar ventana de ringdown alrededor del máximo
+    # 2. Ventana de ringdown
     idx_peak = np.argmax(np.abs(h))
     t_peak = t[idx_peak]
 
@@ -131,13 +157,50 @@ def main() -> None:
 
     t_rel = t_rd - t_rd[0]
 
-    print(f"Ventana de ringdown: duración ~ {t_rel[-1] - t_rel[0]:.6f} s, puntos = {len(t_rel)}")
+    # 3. Normalizar señal
+    h_rms = np.sqrt(np.mean(h_rd**2))
+    if h_rms == 0:
+        h_norm = h_rd
+    else:
+        h_norm = h_rd / h_rms
 
-    # Ajuste
+    print(f"Ventana de ringdown: duración ~ {t_rel[-1] - t_rel[0]:.6f} s, puntos = {len(t_rel)}")
+    print(f"RMS de la ventana: {h_rms:.3e}")
+
+    # 4. Primer ajuste: solo modo 220 GR
+    def model_gr_220(t_arr, A220, phi220):
+        return ringdown_model_GR_220(t_arr, A220, phi220)
+
+    A220_0   = np.max(h_norm)
+    phi220_0 = 0.0
+
+    p0_gr = [A220_0, phi220_0]
+    bounds_gr = (
+        [-10 * abs(A220_0), -2 * np.pi],
+        [ 10 * abs(A220_0),  2 * np.pi],
+    )
+
+    print("Ajustando modo 220 (GR) como paso inicial...")
+    popt_gr, pcov_gr = curve_fit(
+        model_gr_220,
+        t_rel,
+        h_norm,
+        p0=p0_gr,
+        bounds=bounds_gr,
+        maxfev=20000,
+    )
+    perr_gr = np.sqrt(np.diag(pcov_gr))
+    A220_gr_fit, phi220_gr_fit = popt_gr
+
+    print("\nResultado ajuste GR (solo 220):")
+    print(f"A220_GR   = {A220_gr_fit:.3e} ± {perr_gr[0]:.3e}")
+    print(f"phi220_GR = {phi220_gr_fit:.3f} ± {perr_gr[1]:.3f} rad")
+
+    # 5. Segundo ajuste: modelo EDR completo
     k_flow_example     = 1.0
     gamma_flow_example = 10.0
 
-    def model_to_fit(t_arr, A220, phi220, AX, phiX, alpha_flow):
+    def model_edr(t_arr, A220, phi220, AX, phiX, alpha_flow):
         return ringdown_model_EDR(
             t_arr,
             A220=A220,
@@ -149,38 +212,44 @@ def main() -> None:
             gamma_flow=gamma_flow_example,
         )
 
-    A220_0   = np.max(h_rd)
-    phi220_0 = 0.0
-    AX_0     = 0.1 * A220_0
-    phiX_0   = 0.0
-    alpha_0  = 0.0
+    AX_0    = 0.1 * A220_gr_fit
+    phiX_0  = 0.0
+    alpha_0 = 0.0
 
-    p0 = [A220_0, phi220_0, AX_0, phiX_0, alpha_0]
-
-    bounds = (
-        [-10*A220_0, -2*np.pi, -10*A220_0, -2*np.pi, -0.5],
-        [ 10*A220_0,  2*np.pi,  10*A220_0,  2*np.pi,  0.5],
+    p0_edr = [A220_gr_fit, phi220_gr_fit, AX_0, phiX_0, alpha_0]
+    bounds_edr = (
+        [-10 * abs(A220_gr_fit), -2 * np.pi, -10 * abs(A220_gr_fit), -2 * np.pi, -0.5],
+        [ 10 * abs(A220_gr_fit),  2 * np.pi,  10 * abs(A220_gr_fit),  2 * np.pi,  0.5],
     )
 
-    print("Ajustando modelo EDR...")
-    popt, pcov = curve_fit(model_to_fit, t_rel, h_rd, p0=p0, bounds=bounds, maxfev=20000)
-    perr = np.sqrt(np.diag(pcov))
+    print("\nAjustando modelo EDR (220 corregido + X)...")
+    popt_edr, pcov_edr = curve_fit(
+        model_edr,
+        t_rel,
+        h_norm,
+        p0=p0_edr,
+        bounds=bounds_edr,
+        maxfev=20000,
+    )
+    perr_edr = np.sqrt(np.diag(pcov_edr))
 
-    A220_fit, phi220_fit, AX_fit, phiX_fit, alpha_fit = popt
+    A220_fit, phi220_fit, AX_fit, phiX_fit, alpha_fit = popt_edr
 
-    print("\nResultados del ajuste (H1, ventana de ringdown):")
-    print(f"A220       = {A220_fit:.3e} ± {perr[0]:.3e}")
-    print(f"phi220     = {phi220_fit:.3f} ± {perr[1]:.3f} rad")
-    print(f"AX         = {AX_fit:.3e} ± {perr[2]:.3e}")
-    print(f"phiX       = {phiX_fit:.3f} ± {perr[3]:.3f} rad")
-    print(f"alpha_flow = {alpha_fit:.3e} ± {perr[4]:.3e}")
+    print("\nResultados del ajuste EDR (H1, ventana de ringdown normalizada):")
+    print(f"A220       = {A220_fit:.3e} ± {perr_edr[0]:.3e}")
+    print(f"phi220     = {phi220_fit:.3f} ± {perr_edr[1]:.3f} rad")
+    print(f"AX         = {AX_fit:.3e} ± {perr_edr[2]:.3e}")
+    print(f"phiX       = {phiX_fit:.3f} ± {perr_edr[3]:.3f} rad")
+    print(f"alpha_flow = {alpha_fit:.3e} ± {perr_edr[4]:.3e}")
 
-    h_fit = model_to_fit(t_rel, *popt)
+    h_fit = model_edr(t_rel, *popt_edr)
 
-    # Gráfica
+    # 6. Gráfica en unidades originales (desnormalizando)
+    h_fit_physical = h_fit * h_rms
+
     plt.figure(figsize=(10, 5))
     plt.plot(t_rel * 1000, h_rd, label="Datos H1 (ringdown)", lw=1)
-    plt.plot(t_rel * 1000, h_fit, label="Modelo EDR ajustado", lw=2)
+    plt.plot(t_rel * 1000, h_fit_physical, label="Modelo EDR ajustado", lw=2)
     plt.xlabel("Tiempo desde inicio de la ventana [ms]")
     plt.ylabel("Strain")
     plt.title("GW150914 (H1): Ajuste de ringdown con modelo EDR")

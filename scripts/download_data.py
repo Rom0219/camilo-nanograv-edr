@@ -2,7 +2,8 @@
 import os
 import urllib.request
 
-BASE_URL = "https://www.gw-openscience.org/archive/links/GW150914_4KHZ_R1/"
+# URL correcta del directorio de eventos de GW150914 en LOSC/GWOSC
+BASE_URL = "https://losc.ligo.org/s/events/GW150914/"
 
 FILES = {
     "H-H1_LOSC_4_V1-1126259446-32.hdf5",

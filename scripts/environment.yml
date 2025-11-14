@@ -1,19 +1,4 @@
-name: camilo-edr
-channels:
-  - conda-forge
-  - defaults
-dependencies:
-  - python=3.10
-  - numpy
-  - scipy
-  - matplotlib
-  - pip
-  - pip:
-      - pint-pulsar
-      - enterprise-pulsar
-      - enterprise_extensions
-      - libstempo
-      name: edr-gw
+name: edr-gw
 channels:
   - conda-forge
 dependencies:
@@ -25,5 +10,4 @@ dependencies:
   - jupyter
   - pip
   - pip:
-      # gwpy es opcional; si te dio problemas, puedes comentar esta línea
-      - gwpy
+      - gwpy   # si llegara a dar problemas, luego se puede comentar esta línea

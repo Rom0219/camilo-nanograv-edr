@@ -76,7 +76,6 @@ def build_gr_model(psrs):
         psd="powerlaw",          # ley de potencia para el GWB
         noisedict=None,          # puedes pasar un dict de ruido si lo tienes
         components=["gw"],       # solo fondo GWB
-        gamma_gw_prior="uniform",
         upper_limit=False,
     )
     return pta

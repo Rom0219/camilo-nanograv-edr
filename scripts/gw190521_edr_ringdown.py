@@ -8,7 +8,7 @@ Modelos:
 - M2: GR + modo X (220 GR, alpha_flow = 0)
 - M3: EDR completo (220 corregido + X)
 
-Requiere que los archivos HDF5 de GW190521 (H1,L1) estén en data/,
+Requiere que los archivos HDF5 de GW190521 estén en data/,
 descargados con scripts/download_gw190521.py
 """
 
@@ -25,16 +25,19 @@ C_SI    = 2.99792458e8
 MSUN_SI = 1.98847e30
 
 # Parámetros aproximados del remanente de GW190521 (literatura)
-M_FINAL_SOLAR = 142.0   # masa final ~142 Msun
-A_FINAL       = 0.72    # espín final ~0.7
+# (remante ~142 Msun, spin ~0.7)
+M_FINAL_SOLAR = 142.0
+A_FINAL       = 0.72
 
 
 def geom_time_from_mass_solar(m_solar: float) -> float:
+    """Convierte masa solar a tiempo geométrico M = G M / c^3 (s)."""
     return G_SI * m_solar * MSUN_SI / C_SI**3
 
 
 def qnm_220_GR(m_final_solar: float, a_final: float) -> tuple[float, float]:
     """Frecuencia (Hz) y tiempo de decaimiento (s) del modo (2,2,0) en GR."""
+    # Coeficientes de Berti et al. para el modo (2,2,0)
     f1, f2, f3 = 1.5251, -1.1568, 0.1292
     g1, g2, g3 = 0.0889, -0.0260, 0.3350
 
@@ -150,14 +153,14 @@ def ringdown_model_GR_alpha(t: np.ndarray,
 
 
 def load_strain_from_hdf5(path: str) -> tuple[np.ndarray, np.ndarray]:
+    """Carga timeseries y tiempos desde un HDF5 GWOSC de 4 kHz."""
     with h5py.File(path, "r") as f:
-        # LOSC C01/C02 suelen tener datasets strain/Strain con attrs Xstart,Xspacing
-        for key in ["strain/Strain", "strain/strain"]:
+        for key in ["strain/Strain", "strain/strain", "Strain/Strain"]:
             if key in f:
                 dset = f[key]
                 break
         else:
-            raise KeyError("No se encontró 'strain/Strain' en el HDF5.")
+            raise KeyError("No se encontró dataset de strain en el HDF5.")
 
         strain = dset[()]
         t0 = dset.attrs.get("Xstart", 0.0)
@@ -169,6 +172,7 @@ def load_strain_from_hdf5(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 
 def chi2_stats(y: np.ndarray, y_model: np.ndarray, n_params: int) -> tuple[float, float, float, float]:
+    """Devuelve S, chi2_red, AIC y BIC para un modelo dado (sigma = 1)."""
     n = len(y)
     resid = y - y_model
     S = np.sum(resid**2)
@@ -181,17 +185,44 @@ def chi2_stats(y: np.ndarray, y_model: np.ndarray, n_params: int) -> tuple[float
 
 
 def find_h1_file_for_gw190521(data_dir: str) -> str:
-    # Buscar un archivo H1 con GW190521 en el nombre
+    """
+    Busca un archivo H1 de GW190521 en data/, de forma flexible,
+    teniendo en cuenta los nombres tipo GWOSC 4 kHz.
+    """
+    candidates: list[str] = []
+
+    # Patrones más probables (como los que te descargó GWOSC)
     patterns = [
+        "H-H1_GWOSC_4KHZ_R1-1242442952-32.hdf5",
         "H-*GW190521*.hdf5",
-        "H-H1_LOSC*GW190521*.hdf5",
-        "H-H1*190521*.hdf5",
+        "H-H1*GW190521*.hdf5",
+        "H1*GW190521*.hdf5",
     ]
     for pat in patterns:
         matches = glob.glob(os.path.join(data_dir, pat))
-        if matches:
-            return matches[0]
-    raise FileNotFoundError("No se encontró archivo H1 para GW190521 en data/.")
+        candidates.extend(matches)
+
+    # Si sigue vacío, pruebo con '190521' a secas
+    if not candidates:
+        alt_patterns = [
+            "H-*190521*.hdf5",
+            "H-H1*190521*.hdf5",
+            "H1*190521*.hdf5",
+        ]
+        for pat in alt_patterns:
+            matches = glob.glob(os.path.join(data_dir, pat))
+            candidates.extend(matches)
+
+    if not candidates:
+        all_h1 = glob.glob(os.path.join(data_dir, "H-*.hdf5"))
+        print("Archivos H-*.hdf5 encontrados en data/:")
+        for f in all_h1:
+            print("  ", os.path.basename(f))
+        raise FileNotFoundError("No se encontró archivo H1 de GW190521 en data/.")
+
+    chosen = sorted(candidates)[0]
+    print(f"Archivo H1 para GW190521 seleccionado: {chosen}")
+    return chosen
 
 
 def main() -> None:
@@ -204,11 +235,11 @@ def main() -> None:
     t, h = load_strain_from_hdf5(h1_file)
     h = h - np.mean(h)
 
-    # Ventana de ringdown: GW190521 es muy corto (~0.1 s), usamos 1 ms a 30 ms
+    # GW190521 es muy corto; usamos ventana 1–30 ms después del pico
     idx_peak = np.argmax(np.abs(h))
     t_peak = t[idx_peak]
-    t_start = t_peak + 0.001
-    t_end   = t_peak + 0.030
+    t_start = t_peak + 0.001  # 1 ms
+    t_end   = t_peak + 0.030  # 30 ms
 
     mask = (t >= t_start) & (t <= t_end)
     t_rd = t[mask]
@@ -307,10 +338,10 @@ def main() -> None:
     h3_model = m3_edr(t_rel, *popt_m3)
 
     # Estadísticos
-    S0, chi2r0, AIC0, BIC0 = chi2_stats(h_norm, h0,        n_params=2)
-    S1, chi2r1, AIC1, BIC1 = chi2_stats(h_norm, h1_model,  n_params=3)
-    S2, chi2r2, AIC2, BIC2 = chi2_stats(h_norm, h2_model,  n_params=4)
-    S3, chi2r3, AIC3, BIC3 = chi2_stats(h_norm, h3_model,  n_params=5)
+    S0, chi2r0, AIC0, BIC0 = chi2_stats(h_norm, h0,       n_params=2)
+    S1, chi2r1, AIC1, BIC1 = chi2_stats(h_norm, h1_model, n_params=3)
+    S2, chi2r2, AIC2, BIC2 = chi2_stats(h_norm, h2_model, n_params=4)
+    S3, chi2r3, AIC3, BIC3 = chi2_stats(h_norm, h3_model, n_params=5)
 
     print("\n=== Parámetros clave (GW190521 H1) ===")
     print(f"Modelo 1 (alpha_flow): alpha_flow = {alpha_m1:.3e} ± {perr_m1[2]:.3e}")
@@ -324,9 +355,9 @@ def main() -> None:
     print(f"M2 GR+X     : S = {S2:.4e}, chi2_red = {chi2r2:.3f}, AIC = {AIC2:.2f}, BIC = {BIC2:.2f}")
     print(f"M3 EDR full : S = {S3:.4e}, chi2_red = {chi2r3:.3f}, AIC = {AIC3:.2f}, BIC = {BIC3:.2f}")
 
-    # Figura similar a la de GW150914: datos + M0 + M3 + residuales
-    h0_phys = h0 * h_rms
-    h3_phys = h3_model * h_rms
+    # Figura: datos + M0 + M3 + residuales
+    h0_phys  = h0       * h_rms
+    h3_phys  = h3_model * h_rms
     resid_m0 = h_norm - h0
     resid_m3 = h_norm - h3_model
 

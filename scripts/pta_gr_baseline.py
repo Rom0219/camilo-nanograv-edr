@@ -88,7 +88,9 @@ def run_mcmc(pta, outdir="chains/gr_baseline", nsteps=500):
     nsteps se mantiene pequeño para que el script sea rápido en Codespaces.
     Para análisis reales, sube nsteps (p. ej. 1e5 o más).
     """
-    os.makedirs(outdir, exist_ok=True)
+    # Crear carpeta si no existe; si ya existe, no hacer nada
+    if not os.path.isdir(outdir):
+        os.makedirs(outdir)
 
     sampler = model_utils.setup_sampler(
         pta,

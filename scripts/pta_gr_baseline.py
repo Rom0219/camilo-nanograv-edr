@@ -2,11 +2,6 @@
 """
 Análisis base NANOGrav 15-yr: modelo estándar GR
 (HD + power-law GWB) usando enterprise + enterprise_extensions.
-
-Requiere:
-- enterprise
-- enterprise_extensions
-- la_forge (para manejar las cadenas, opcional pero cómodo)
 """
 
 import glob
@@ -15,13 +10,6 @@ import numpy as np
 
 from enterprise.pulsar import Pulsar
 from enterprise_extensions import models, model_utils
-
-# Opcional: usa la_forge si la tienes instalada
-try:
-    from la_forge.core import Core
-    HAVE_LAFORGE = True
-except ImportError:
-    HAVE_LAFORGE = False
 
 
 def load_ng15_pulsars(par_dir="data/ng15yr/par", tim_dir="data/ng15yr/tim"):
@@ -44,7 +32,6 @@ def load_ng15_pulsars(par_dir="data/ng15yr/par", tim_dir="data/ng15yr/tim"):
     psrs = []
     for par, tim in zip(par_files, tim_files):
         print(f"Cargando pulsar: {os.path.basename(par)} / {os.path.basename(tim)}")
-        # Ephemeris típico en NG15yr (ajusta si hace falta)
         psrs.append(Pulsar(par, tim, ephem="DE440"))
 
     print(f"Total pulsars cargados: {len(psrs)}")
@@ -53,24 +40,24 @@ def load_ng15_pulsars(par_dir="data/ng15yr/par", tim_dir="data/ng15yr/tim"):
 
 def build_gr_model(psrs):
     """
-    Construye el modelo estándar GR:
-    - Ruido individual por pulsar (blanco/rojo, etc. según defaults model_2a)
-    - Fondo GWB isótropo con correlaciones Hellings–Downs (HD)
-    - Espectro de potencia simple (power-law) para el GWB
+    Modelo estándar NANOGrav:
+    - ruido por pulsar
+    - fondo GWB isótropo con HD
+    - espectro de potencia power-law
     """
     pta = models.model_2a(
         psrs,
-        psd="powerlaw",          # ley de potencia para el GWB
-        noisedict=None,          # puedes añadir dict de ruido si lo tienes
-        components=["gw"],       # componente de fondo GWB
+        psd="powerlaw",
+        noisedict=None,
+        components=["gw"],
         gamma_gw_prior="uniform",
         upper_limit=False,
     )
     return pta
 
 
-def run_mcmc(pta, outdir="chains/gr_baseline", nsteps=int(1e5)):
-    """Lanza un Metropolis–Hastings simple sobre el modelo dado."""
+def run_mcmc(pta, outdir="chains/gr_baseline", nsteps=2000):
+    """MCMC corto de prueba (2000 pasos) solo para verificar que todo corre."""
     os.makedirs(outdir, exist_ok=True)
 
     sampler = model_utils.setup_sampler(
@@ -79,7 +66,6 @@ def run_mcmc(pta, outdir="chains/gr_baseline", nsteps=int(1e5)):
         resume=False,
     )
 
-    # Punto inicial: muestrea todos los parámetros una vez
     x0 = np.hstack([p.sample() for p in pta.params])
 
     print(f"Iniciando MCMC con {nsteps} pasos...")
@@ -92,13 +78,6 @@ def run_mcmc(pta, outdir="chains/gr_baseline", nsteps=int(1e5)):
     )
 
     print("MCMC terminado.")
-
-    # Si tienes la_forge, crea un Core para inspeccionar las cadenas
-    if HAVE_LAFORGE:
-        print("Creando objeto Core de la_forge...")
-        core = Core(label="gr_baseline", outdir=outdir)
-        print(core)
-        print("la_forge Core creado.")
 
 
 def main():
